@@ -1,5 +1,5 @@
 ''' 
-1 problem  solution ''' 
+1st  problem  solution ''' 
 
 
 from sklearn.metrics import f1_score
@@ -74,4 +74,65 @@ x, y = make_classification(
 
 model_accuracy = DataHandling(x, y).make_classification_model()
 print("Model F1 Score:", model_accuracy)
- 
+
+''' 2nd problem solution ''' 
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from imblearn.combine import SMOTETomek
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.metrics import precision_recall_curve, auc
+from sklearn.utils.class_weight import compute_class_weight
+import tensorflow as tf
+
+x, y = make_classification(n_samples=10000, n_features=20, n_informative=10, 
+                           n_redundant=5, weights=[0.995, 0.005], flip_y=0.02, random_state=42)
+
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, stratify=y, random_state=42)
+
+smote_tomek = SMOTETomek(random_state=42)
+x_train_resampled, y_train_resampled = smote_tomek.fit_resample(x_train, y_train)
+
+class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+class_weight_dict = {i: weight for i, weight in enumerate(class_weights)}
+ RandomForestClassifier(n_estimators=300, class_weight=class_weight_dict, max_depth=5, random_state=42)
+rf_model.fit(x_train_resampled, y_train_resampled)
+
+
+base_learners = [
+    ('rf', RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=42)),
+    ('xgb', XGBClassifier(scale_pos_weight=class_weights[1], use_label_encoder=False, eval_metric='logloss')),
+    ('lgbm', LGBMClassifier(class_weight="balanced"))
+]
+
+meta_model = LogisticRegression()
+stacking_model = StackingClassifier(estimators=base_learners, final_estimator=meta_model, cv=5)
+stacking_model.fit(x_train_resampled, y_train_resampled)
+
+ = stacking_model.predict_proba(x_test)[:, 1]  # Get probability scores
+precision, recall, _ = precision_recall_curve(y_test, y_probs)
+pr_auc = auc(recall, precision)
+
+print("Precision-Recall AUC:", pr_auc)
+
+
+def focal_loss(alpha=0.25, gamma=2.0):
+    def loss(y_true, y_pred):
+        bce = tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
+        pt = tf.exp(-bce)
+        return alpha * (1 - pt) ** gamma * bce
+    return loss
+
+nn_model = tf.keras.Sequential([
+    tf.keras.layers.Dense(64, activation='relu', input_shape=(x_train.shape[1],)),
+    tf.keras.layers.Dense(32, activation='relu'),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+nn_model.compile(optimizer='adam', loss=focal_loss(), metrics=['AUC'])
+nn_model.fit(x_train_resampled, y_train_resampled, epochs=10, batch_size=32, validation_data=(x_test, y_test))
+
